@@ -1,0 +1,13 @@
+# Google Sheets (gspread)と認証に必要なライブラリ
+gspread
+google-auth
+oauth2client
+
+# YouTubeのトランスクリプト取得に特化したライブラリ
+youtube-transcript-api
+
+# Gemini API (分析)
+google-genai
+
+# 必要であれば、汎用的なHTTP通信ライブラリ
+requests
