@@ -7,7 +7,7 @@ oauth2client
 youtube-transcript-api
 
 # Gemini API (分析)
-google-genai
+google-genaigoogle-generativeai
 
 # 必要であれば、汎用的なHTTP通信ライブラリ
 requests
