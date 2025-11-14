@@ -65,12 +65,12 @@ def get_transcript(video_id: str) -> Optional[str]:
         else:
             print(f"  > Error: No transcript found for video {video_id}.")
             return None
-        except TranscriptsDisabled:
-            print(f"  > Error: Transcripts are disabled for video {video_id}.")
-            return None
-        except Exception as e:
-            print(f"  > Error: Failed to get transcript for {video_id}. {e}")
-            return None
+    except TranscriptsDisabled:
+        print(f"  > Error: Transcripts are disabled for video {video_id}.")
+        return None
+    except Exception as e:
+        print(f"  > Error: Failed to get transcript for {video_id}. {e}")
+        return None
 
 def analyze_route_with_gemini(transcript: str) -> Dict[str, List[str]]:
     """Gemini APIを使用してトランスクリプトからルート情報を分析する"""
