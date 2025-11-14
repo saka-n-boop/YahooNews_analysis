@@ -53,12 +53,10 @@ def get_video_id(url: str) -> Optional[str]:
     return None
 
 def get_transcript(video_id: str) -> Optional[str]:
-    """YouTube動画のトランスクリプトを取得する"""
     try:
-        # transcript_listはリスト形式
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
+        result = YouTubeTranscriptApi.get_transcripts([video_id], languages=['ja', 'en'])
+        transcript_list = result.get(video_id)
         if transcript_list:
-            # テキスト部分だけを連結して返す
             full_transcript = " ".join([item['text'] for item in transcript_list])
             return full_transcript
         else:
