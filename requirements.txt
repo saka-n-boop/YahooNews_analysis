@@ -1,12 +1,6 @@
-# Google Sheets (gspread)と認証に必要なライブラリ
 gspread
 google-auth
 oauth2client
-
-# YouTubeのトランスクリプト取得に特化したライブラリ（公式GitHubから取得）
-git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
-
 google-generativeai
-
-# 必要であれば、汎用的なHTTP通信ライブラリ
 requests
+# youtube-transcript-apiはymlで明示的にインストールするのでここから削除してもOK
