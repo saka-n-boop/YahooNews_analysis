@@ -3,8 +3,8 @@ gspread
 google-auth
 oauth2client
 
-# YouTubeのトランスクリプト取得に特化したライブラリ
-youtube-transcript-api==1.2.3
+# YouTubeのトランスクリプト取得に特化したライブラリ（公式GitHubから取得）
+git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
 
 google-generativeai
 
