@@ -16,19 +16,22 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Uninstall possible local/conflicting youtube-transcript-api
-      run: |
-        python -m pip uninstall -y youtube-transcript-api || true
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
 
-    - name: Install dependencies (no cache, explicit version)
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install --no-cache-dir -r requirements.txt
+    - name: Install dependencies from requirements.txt
+      run: python -m pip install --no-cache-dir -r requirements.txt
 
-    - name: Show installed packages and youtube-transcript-api location
+    - name: Uninstall any existing youtube-transcript-api (prevent PyPI conflict)
+      run: python -m pip uninstall -y youtube-transcript-api || true
+
+    - name: Install youtube-transcript-api from official GitHub
+      run: python -m pip install --no-cache-dir git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
+
+    - name: Show installed packages and youtube-transcript-api details
       run: |
         python -m pip list
-        python -c "import youtube_transcript_api; print('youtube_transcript_api path:', youtube_transcript_api.__file__)"
+        python -c "import youtube_transcript_api; print('PATH:', youtube_transcript_api.__file__)"
         python -c "from youtube_transcript_api import YouTubeTranscriptApi; print('YouTubeTranscriptApi dir:', dir(YouTubeTranscriptApi))"
 
     - name: Run Route Analyzer
