@@ -1,2 +1,2 @@
-# YouTube_7ch
-YouTube主要7ch試乗動画
+# YahooNews_国内OEM
+Yahooニュース取得とGeminiでの分析
