@@ -1,10 +1,12 @@
 name: Yahoo News Scraper and Gemini Analyzer
 
 on:
-  push:
-    branches:
-      - main
+
   workflow_dispatch:
+  
+  # もし定期実行を入れているなら schedule は残してOK
+  # schedule:
+  #   - cron: ' 05,6,
 
 jobs:
   run-script:
@@ -17,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
