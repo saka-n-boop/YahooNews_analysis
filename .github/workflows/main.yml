@@ -1,12 +1,10 @@
 name: Yahoo News Scraper and Gemini Analyzer
 
 on:
-
   workflow_dispatch:
-  
-  # もし定期実行を入れているなら schedule は残してOK
-  # schedule:
-  #   - cron: ' 05,6,
+  # 定期実行する場合
+   schedule:
+     - cron: '0 21 * * *' # 時間指定の記述漏れを防ぐため例を入れています
 
 jobs:
   run-script:
@@ -26,11 +24,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-          # --- (修正箇所) ---
-          # Gemimni APIのエラー (module 'google.genai' has no attribute 'configure') 対策
-          # キャッシュを無効化 (--no-cache-dir) し、強制的に最新版をインストールします。
+          # 明示的にキャッシュ無効化で最新版を入れる（エラー対策として有効）
           pip install --no-cache-dir --upgrade google-generativeai
-          # --- (修正ここまで) ---
 
       - name: Run Python script
         env:
