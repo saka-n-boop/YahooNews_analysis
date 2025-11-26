@@ -20,7 +20,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-# --- Gemini API 関連のインポート ---
+# --- Gemini API 関連のインポート (v1.0 SDK) ---
 from google import genai
 from google.genai import types
 from google.api_core.exceptions import ResourceExhausted
@@ -42,22 +42,22 @@ MAX_SHEET_ROWS_FOR_REPLACE = 10000
 # 最大取得ページ数を10に設定
 MAX_PAGES = 10 
 
-# ヘッダー (J列, K列を含む)
+# ヘッダー (J列, K列を含む全11列)
 YAHOO_SHEET_HEADERS = ["URL", "タイトル", "投稿日時", "ソース", "本文", "コメント数", "対象企業", "カテゴリ分類", "ポジネガ分類", "日産関連文", "日産ネガ文"]
 REQ_HEADERS = {"User-Agent": "Mozilla/5.0"}
 TZ_JST = timezone(timedelta(hours=9))
 
-# プロンプトファイル（全てまとめて読み込みます）
+# 読み込むプロンプトファイル一覧
 ALL_PROMPT_FILES = [
     "prompt_gemini_role.txt",
-    "prompt_posinega.txt",
-    "prompt_category.txt",
     "prompt_target_company.txt",
+    "prompt_category.txt",
+    "prompt_posinega.txt",
     "prompt_nissan_mention.txt",
     "prompt_nissan_sentiment.txt"
 ]
 
-# Gemini API Key
+# Gemini API Keyの読み込み
 try:
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -152,13 +152,13 @@ def load_merged_prompt() -> str:
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # 役割定義 (最初のファイル)
+        # 1つ目のファイルをRoleとして読み込み
         role_file = ALL_PROMPT_FILES[0]
         file_path = os.path.join(script_dir, role_file)
         with open(file_path, 'r', encoding='utf-8') as f:
             role_instruction = f.read().strip()
         
-        # 残りの指示書 (通常分析 + 日産分析)
+        # 残りのファイルを順番に結合
         for filename in ALL_PROMPT_FILES[1:]:
             file_path = os.path.join(script_dir, filename)
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -168,12 +168,13 @@ def load_merged_prompt() -> str:
                         
         base_prompt = role_instruction + "\n" + "\n".join(combined_instructions)
         
-        # 【重要】変な文章が入らないように指示を強化
-        base_prompt += "\n\n【重要】\n日産に関する言及がない場合、またはネガティブな文脈がない場合は、説明文を書かずに、必ず『なし』という単語のみを出力してください。"
+        # 【重要】ハルシネーション対策の共通指示を追加
+        base_prompt += "\n\n【重要】\n該当する情報（特に日産への言及やネガティブ要素）がない場合は、説明文や翻訳を一切書かず、必ず単語で『なし』とだけ出力してください。"
         
         base_prompt += "\n\n記事本文:\n{TEXT_TO_ANALYZE}"
 
         GEMINI_PROMPT_TEMPLATE = base_prompt
+        print(" プロンプトファイルを統合してロードしました。")
         return base_prompt
     except Exception as e:
         print(f"致命的エラー: プロンプトファイルの読み込み中にエラー: {e}")
@@ -225,6 +226,7 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
             return
         except gspread.exceptions.APIError as e:
             error_str = str(e)
+            # 500番台のエラーは待機してリトライ
             if any(code in error_str for code in ['500', '502', '503']):
                 wait_seconds = 30 * (attempt + 1)
                 print(f"  ?? Google API Server Error (502/503). {wait_seconds}秒待機してリトライします... ({attempt+1}/{max_retries})")
@@ -256,13 +258,14 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
         return default_res
 
     MAX_RETRIES = 3
-    MAX_CHARACTERS = 15000 
+    MAX_CHARACTERS = 15000 # トークン制限対策
     
     for attempt in range(MAX_RETRIES):
         try:
             text_for_prompt = text_to_analyze[:MAX_CHARACTERS]
             prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text_for_prompt)
             
+            # JSONスキーマで出力項目を強制する
             response = GEMINI_CLIENT.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=prompt,
@@ -272,8 +275,8 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
                         "company_info": {"type": "string", "description": "記事の主題企業名"},
                         "category": {"type": "string", "description": "カテゴリ分類"},
                         "sentiment": {"type": "string", "description": "ポジティブ、ニュートラル、ネガティブ"},
-                        "nissan_related": {"type": "string", "description": "日産に関連する言及（なければ『なし』と出力）"},
-                        "nissan_negative": {"type": "string", "description": "日産に対するネガティブな文脈（なければ『なし』と出力）"}
+                        "nissan_related": {"type": "string", "description": "日産に関連する言及（なければ『なし』）"},
+                        "nissan_negative": {"type": "string", "description": "日産に対するネガティブな文脈（なければ『なし』）"}
                     }}
                 ),
             )
@@ -351,6 +354,7 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             if time_tag:
                 date_str = time_tag.text.strip()
             
+            # ソース抽出
             source_text = ""
             source_container = article.find("div", class_=re.compile("sc-n3vj8g-0"))
             if source_container:
@@ -543,7 +547,7 @@ def sort_yahoo_sheet(gc: gspread.Client):
     except Exception as e:
         print(f" ?? 書式設定エラー: {e}") 
 
-    # ソート処理 (【修正】 'desc' -> 'des')
+    # ソート処理 (【修正済み】 'desc' -> 'des')
     try:
         last_col_index = len(YAHOO_SHEET_HEADERS)
         last_col_a1 = gspread_util_col_to_letter(last_col_index)
@@ -583,6 +587,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
             data_row.extend([''] * (len(YAHOO_SHEET_HEADERS) - len(data_row)))
             
         row_num = idx + 2
+        
         url = str(data_row[0])
         title = str(data_row[1])
         post_date_raw = str(data_row[2])
@@ -654,6 +659,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
                     needs_update_to_sheet = True
 
         if needs_update_to_sheet:
+            # 502エラー対策付き更新
             update_sheet_with_retry(
                 ws, 
                 range_name=f'C{row_num}:F{row_num}',
@@ -665,7 +671,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
     print(f" ? {update_count} 行の詳細情報を更新しました。")
 
 
-# ====== Gemini分析の実行・即時反映 (G〜K列) 1回リクエスト統合版 ======
+# ====== Gemini分析の実行・即時反映 (G?K列) 1回リクエスト統合版 ======
 
 def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
@@ -680,7 +686,7 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     data_rows = all_values[1:]
     update_count = 0
     
-    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G〜K列) =====")
+    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G?K列) =====")
 
     for idx, data_row in enumerate(data_rows):
         if len(data_row) < len(YAHOO_SHEET_HEADERS):
@@ -691,8 +697,8 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
         title = str(data_row[1])
         body = str(data_row[4])
         
-        # 既存の値
-        current_vals = data_row[6:11] # G, H, I, J, K
+        # 既存の値 (G, H, I, J, K)
+        current_vals = data_row[6:11] 
         # 全て埋まっていればスキップ
         if all(str(v).strip() for v in current_vals):
             continue
@@ -726,16 +732,14 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
             final_nissan_rel = "－ (対象が日産)"
             final_nissan_neg = "－"
         
-        # 2. 変な文章の強制上書き
-        # ヘブライ語や「発見されませんでした」系の文章を検知したら「なし」に書き換え
-        # (簡易的なチェック: 日本語のひらがな/カタカナ/漢字以外が多い、または特定のキーワードを含む場合)
+        # 2. 変な文章(ハルシネーション)の強制排除
         for check_text in [final_nissan_rel, final_nissan_neg]:
+            # 「言及はありません」「No mention」等の説明文を検知したら「なし」に置換
             if any(keyword in check_text for keyword in ["not mentioned", "no mention", "発見されませんでした", "言及はありません", "記載されていません"]):
                  if check_text == final_nissan_rel: final_nissan_rel = "なし"
                  if check_text == final_nissan_neg: final_nissan_neg = "なし"
             
-            # ヘブライ語等の判定は難しいので、「なし」とAIが返してくることをプロンプトで強く期待するが、
-            # もし英語の "None" が返ってきたら "なし" に直す
+            # "None" が文字列で返ってきた場合
             if check_text.lower() == "none":
                  if check_text == final_nissan_rel: final_nissan_rel = "なし"
                  if check_text == final_nissan_neg: final_nissan_neg = "なし"
