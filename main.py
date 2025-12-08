@@ -1,23 +1,3 @@
-ご要望（重複除外、Commentsシートの日時ソート）を完璧に盛り込んだ構成で作成しました。
-
-今回はファイルが2つになります。
-
-comment_scraper.py （新規作成：コメント取得・書き込み・ソートのロジック）
-
-main.py （既存改修：最後に上記を呼び出す）
-
-以下、それぞれの全文です。
-
-1. comment_scraper.py (新規作成)
-
-このファイルを main.py と同じ場所に作成してください。
-コメント取得、10件ごとの結合、重複チェック、そして最後に日時順（新しい順）へのソートを行います。
-
-code
-Python
-download
-content_copy
-expand_less
 import time
 import re
 import requests
