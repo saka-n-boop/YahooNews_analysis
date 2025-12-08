@@ -2,7 +2,7 @@ name: Yahoo News Scraper and Gemini Analyzer
 
 on:
   workflow_dispatch:
-  # 定期実行 (UTC 05:55 = JST 14:05)
+  # 定期実行 (UTC 05:55 = JST 14:55)
   schedule:
     - cron: '55 05 * * *'
 
@@ -33,5 +33,6 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_API_KEY_2: ${{ secrets.GOOGLE_API_KEY_2 }} 
           SPREADSHEET_KEY: ${{ secrets.SPREADSHEET_KEY }}
         run: python main.py
