@@ -152,20 +152,24 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         if url in existing_urls:
             continue
 
-        # --- 条件判定 ---
+        # --- 条件判定 (整理版) ---
         is_target = False
         
-        # 条件1: コメント数 > 100
-        try:
-            cnt = int(re.sub(r'\D', '', comment_count_str))
-            if cnt > 100: is_target = True
-        except: pass
+        # まず「日産」が含まれるかチェック (対象企業列)
+        if target_company.startswith("日産") or "日産" in target_company:
             
-        # 条件2: 対象企業が日産(開始) かつ ネガティブ
-        if not is_target:
-            if target_company.startswith("日産") or "日産" in target_company:
-                 if "ネガティブ" in sentiment:
-                     is_target = True
+            # 条件A: コメント数が100件超
+            try:
+                cnt = int(re.sub(r'\D', '', comment_count_str))
+                if cnt > 100:
+                    is_target = True
+            except:
+                pass
+            
+            # 条件B: ポジネガがネガティブ (条件AがFalseでもチェック)
+            if not is_target:
+                if "ネガティブ" in sentiment:
+                    is_target = True
         
         if is_target:
             print(f"  - 対象記事発見(行{i+2}): {title[:20]}...")
