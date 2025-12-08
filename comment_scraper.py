@@ -29,7 +29,10 @@ def ensure_comments_sheet(sh: gspread.Spreadsheet):
     return ws
 
 def fetch_comments_from_url(article_url: str) -> list[str]:
-    """ 記事URLから全コメントを取得し、10件ごとに結合したリストを返す """
+    """ 
+    記事URLから全コメントを取得し、10件ごとに結合したリストを返す 
+    対策: &order=newer で新しい順に取得し、重複を厳密に排除する
+    """
     
     # URL調整 (/commentsエンドポイントを作成)
     base_url = article_url.split('?')[0]
@@ -40,12 +43,15 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
              base_url = f"{base_url}/comments"
 
     all_comments_data = [] 
+    seen_comments = set() # 重複チェック用（ユーザー名+本文のハッシュ）
     page = 1
     
-    print(f"    - コメント取得開始: {base_url}")
+    print(f"    - コメント取得開始(新しい順): {base_url}")
 
     while True:
-        target_url = f"{base_url}?page={page}"
+        # 【対策1】order=newer を付与して新しい順にする
+        target_url = f"{base_url}?page={page}&order=newer"
+        
         try:
             res = requests.get(target_url, headers=REQ_HEADERS, timeout=10)
             if res.status_code == 404:
@@ -57,19 +63,20 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
 
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # 記事タグ構造から取得（クラス名非依存）
+        # 記事タグ構造から取得
         articles = soup.find_all('article')
         
         if not articles:
             break 
 
-        comments_in_page = 0
+        new_comments_in_this_page = 0
+        
         for art in articles:
-            # ユーザー名 (h2直下のテキストなど)
+            # ユーザー名
             user_tag = art.find('h2')
             user_name = user_tag.get_text(strip=True) if user_tag else "匿名"
             
-            # 本文 (最も長いpタグを採用)
+            # 本文
             p_tags = art.find_all('p')
             comment_body = ""
             if p_tags:
@@ -77,10 +84,20 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
             
             if comment_body:
                 full_text = f"【投稿者: {user_name}】\n{comment_body}"
+                
+                # 【対策2】重複チェック
+                # 既に取得済みの内容ならスキップ
+                if full_text in seen_comments:
+                    continue
+                
+                seen_comments.add(full_text)
                 all_comments_data.append(full_text)
-                comments_in_page += 1
+                new_comments_in_this_page += 1
         
-        if comments_in_page == 0:
+        # このページで新しいコメントが1つも取れなかった場合
+        # (= ページ送りしたのに1ページ目と同じ内容が返ってきた、等の場合)
+        # ループを終了する
+        if new_comments_in_this_page == 0:
             break 
 
         page += 1
@@ -152,7 +169,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         if url in existing_urls:
             continue
 
-        # --- 条件判定 (整理版) ---
+        # --- 条件判定 ---
         is_target = False
         
         # まず「日産」が含まれるかチェック (対象企業列)
