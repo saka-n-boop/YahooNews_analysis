@@ -803,7 +803,7 @@ def main():
     sort_yahoo_sheet(gc)
     
     # ステップ④ Gemini分析 (一括)
-    analyze_with_gemini_and_update_sheet(gc)
+    #analyze_with_gemini_and_update_sheet(gc)
     
     # ステップ⑤ コメント収集
     print("\n===== ⑤ コメント取得開始 =====")
