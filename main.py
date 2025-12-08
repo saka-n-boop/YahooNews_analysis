@@ -291,7 +291,7 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
             
             # JSONスキーマで出力項目を強制する
             response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -322,7 +322,12 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(2)
                 continue
-            return default_res
+            else:
+                # 【ここを追加】最終的に失敗した理由をログに出す
+                print(f"    ! Gemini分析最終エラー: {e}")
+                # もしレスポンス内容が見れるなら出すとセーフティフィルタかわかる
+                # print(f"    ! レスポンス内容: {response.text if 'response' in locals() else 'None'}")
+                return default_res
             
     return default_res
 
@@ -688,7 +693,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
     print(f" ? {update_count} 行の詳細情報を更新しました。")
 
 
-# ====== Gemini分析の実行・即時反映 (G?K列) 1回リクエスト統合版 ======
+# ====== Gemini分析の実行・即時反映 (G〜K列) 1回リクエスト統合版 ======
 
 def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
@@ -703,7 +708,7 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     data_rows = all_values[1:]
     update_count = 0
     
-    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G-K列) =====")
+    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G〜K列) =====")
 
     for idx, data_row in enumerate(data_rows):
         if len(data_row) < len(YAHOO_SHEET_HEADERS):
