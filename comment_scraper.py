@@ -43,13 +43,13 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
              base_url = f"{base_url}/comments"
 
     all_comments_data = [] 
-    seen_comments = set() # 重複チェック用（ユーザー名+本文のハッシュ）
+    seen_comments = set() # 重複チェック用
     page = 1
     
     print(f"    - コメント取得開始(新しい順): {base_url}")
 
     while True:
-        # 【対策1】order=newer を付与して新しい順にする
+        # order=newer を付与して新しい順にする
         target_url = f"{base_url}?page={page}&order=newer"
         
         try:
@@ -85,8 +85,7 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
             if comment_body:
                 full_text = f"【投稿者: {user_name}】\n{comment_body}"
                 
-                # 【対策2】重複チェック
-                # 既に取得済みの内容ならスキップ
+                # 重複チェック
                 if full_text in seen_comments:
                     continue
                 
@@ -94,9 +93,7 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
                 all_comments_data.append(full_text)
                 new_comments_in_this_page += 1
         
-        # このページで新しいコメントが1つも取れなかった場合
-        # (= ページ送りしたのに1ページ目と同じ内容が返ってきた、等の場合)
-        # ループを終了する
+        # 新しいコメントがなければ終了
         if new_comments_in_this_page == 0:
             break 
 
@@ -137,7 +134,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
 
     dest_ws = ensure_comments_sheet(sh)
     
-    # 既存データの読み込み（重複チェック用）
+    # 既存データの読み込み
     dest_rows = dest_ws.get_all_values()
     existing_urls = set()
     if len(dest_rows) > 1:
@@ -151,10 +148,6 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
     process_count = 0
 
     for i, row in enumerate(data_rows):
-        # 列のインデックス (0始まり)
-        # 0:URL, 1:タイトル, 2:日時, 3:ソース, 4:本文, 5:コメ数, 
-        # 6:企業(G), 7:カテ(H), 8:ポジネガ(I), 9:日産関連(J), 10:日産ネガ(K)
-        
         if len(row) < 11: continue
         
         url = row[0]
@@ -162,31 +155,31 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         post_date = row[2]
         source = row[3]
         comment_count_str = row[5]
-        target_company = row[6]
-        sentiment = row[8]
+        # target_company = row[6] # 今回は使用しない
+        # sentiment = row[8]      # 今回は使用しない
+        nissan_neg_text = row[10] # K列: 日産ネガ文
         
-        # 重複チェック（既にCommentsシートにあるURLはスキップ）
+        # 重複チェック
         if url in existing_urls:
             continue
 
-        # --- 条件判定 ---
+        # --- 条件判定 (変更後) ---
         is_target = False
         
-        # まず「日産」が含まれるかチェック (対象企業列)
-        if target_company.startswith("日産") or "日産" in target_company:
+        # 条件①: コメント数が100件以上 (企業問わず)
+        try:
+            cnt = int(re.sub(r'\D', '', comment_count_str))
+            if cnt >= 100:
+                is_target = True
+        except:
+            pass
             
-            # 条件A: コメント数が100件超
-            try:
-                cnt = int(re.sub(r'\D', '', comment_count_str))
-                if cnt > 100:
-                    is_target = True
-            except:
-                pass
-            
-            # 条件B: ポジネガがネガティブ (条件AがFalseでもチェック)
-            if not is_target:
-                if "ネガティブ" in sentiment:
-                    is_target = True
+        # 条件②: 日産ネガ文に記載がある ("なし" 以外)
+        if not is_target:
+            val = str(nissan_neg_text).strip()
+            # 「なし」「N/A」「-」以外の記述があれば対象
+            if val and val not in ["なし", "N/A", "N/A(No Body)", "-"]:
+                is_target = True
         
         if is_target:
             print(f"  - 対象記事発見(行{i+2}): {title[:20]}...")
@@ -204,7 +197,6 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         try:
             last_row = len(dest_ws.col_values(1))
             if last_row > 1:
-                # C列(3列目)の日付で降順ソート ('des')
                 dest_ws.sort((3, 'des'), range=f'A2:Z{last_row}') 
         except Exception as e:
             print(f"  ! ソートエラー: {e}")
