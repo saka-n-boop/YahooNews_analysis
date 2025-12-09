@@ -291,7 +291,7 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
             
             # JSONスキーマで出力項目を強制する
             response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-2.5-flash-live',
+                model='gemini-2.0-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -803,7 +803,7 @@ def main():
     sort_yahoo_sheet(gc)
     
     # ステップ④ Gemini分析 (一括)
-    #analyze_with_gemini_and_update_sheet(gc)
+    analyze_with_gemini_and_update_sheet(gc)
     
     # ステップ⑤ コメント収集
     print("\n===== ⑤ コメント取得開始 =====")
