@@ -2,9 +2,9 @@ name: Yahoo News Scraper and Gemini Analyzer
 
 on:
   workflow_dispatch:
-  # 定期実行 (UTC 05:55 = JST 14:55)
+  # 定期実行 (UTC 05:55 = JST 14:25)
   schedule:
-    - cron: '55 05 * * *'
+    - cron: '25 05 * * *'
 
 concurrency:
   group: yahoo-news-scraper-and-gemini-analyzer
