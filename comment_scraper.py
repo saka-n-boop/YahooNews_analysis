@@ -31,7 +31,7 @@ def ensure_comments_sheet(sh: gspread.Spreadsheet):
 def fetch_comments_from_url(article_url: str) -> list[str]:
     """ 
     記事URLから全コメントを取得し、10件ごとに結合したリストを返す 
-    対策: &order=newer で新しい順に取得し、重複を厳密に排除する
+    対策: &order=newer で新しい順に取得し、重複と不要な管理テキストを排除する
     """
     
     # URL調整 (/commentsエンドポイントを作成)
@@ -83,6 +83,19 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
                 comment_body = max([p.get_text(strip=True) for p in p_tags], key=len)
             
             if comment_body:
+                # --- 【追加】ノイズ除去フィルタ ---
+                # 管理用テキストなどが含まれていたらスキップする
+                ignore_phrases = [
+                    "このコメントを削除しますか",
+                    "コメントを削除しました",
+                    "違反報告する",
+                    "非表示・報告",
+                    "投稿を受け付けました"
+                ]
+                if any(phrase in comment_body for phrase in ignore_phrases):
+                    continue
+                # ----------------------------------
+
                 full_text = f"【投稿者: {user_name}】\n{comment_body}"
                 
                 # 重複チェック
@@ -155,18 +168,18 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         post_date = row[2]
         source = row[3]
         comment_count_str = row[5]
-        # target_company = row[6] # 今回は使用しない
-        # sentiment = row[8]      # 今回は使用しない
-        nissan_neg_text = row[10] # K列: 日産ネガ文
+        target_company = row[6]
+        # sentiment = row[8]
+        nissan_neg_text = row[10] # K列
         
         # 重複チェック
         if url in existing_urls:
             continue
 
-        # --- 条件判定 (変更後) ---
+        # --- 条件判定 ---
         is_target = False
         
-        # 条件①: コメント数が100件以上 (企業問わず)
+        # 条件①: コメント数が100件以上
         try:
             cnt = int(re.sub(r'\D', '', comment_count_str))
             if cnt >= 100:
@@ -177,7 +190,6 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         # 条件②: 日産ネガ文に記載がある ("なし" 以外)
         if not is_target:
             val = str(nissan_neg_text).strip()
-            # 「なし」「N/A」「-」以外の記述があれば対象
             if val and val not in ["なし", "N/A", "N/A(No Body)", "-"]:
                 is_target = True
         
