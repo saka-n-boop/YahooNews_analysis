@@ -13,7 +13,7 @@ def ensure_comments_sheet(sh: gspread.Spreadsheet):
     try:
         ws = sh.worksheet(COMMENTS_SHEET_NAME)
     except gspread.exceptions.WorksheetNotFound:
-        # 列数は多めに確保
+        # 列数は多めに確保 (300列 = KN列まで)
         ws = sh.add_worksheet(title=COMMENTS_SHEET_NAME, rows="1000", cols="300")
         
         # ヘッダー作成
@@ -209,7 +209,8 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         try:
             last_row = len(dest_ws.col_values(1))
             if last_row > 1:
-                dest_ws.sort((3, 'des'), range=f'A2:Z{last_row}') 
+                # 【修正済み】 ソート範囲を KN列(300列) まで広げる
+                dest_ws.sort((3, 'des'), range=f'A2:KN{last_row}') 
         except Exception as e:
             print(f"  ! ソートエラー: {e}")
             
