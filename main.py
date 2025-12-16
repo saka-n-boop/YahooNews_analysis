@@ -55,7 +55,7 @@ ALL_PROMPT_FILES = [
     "prompt_posinega.txt",
     "prompt_nissan_mention.txt",
     "prompt_nissan_sentiment.txt",
-    "prompt_comment_analysis.txt" # コメント分析用を追加
+    "prompt_comment_analysis.txt"
 ]
 
 # ====== APIキー管理設定 ======
@@ -84,8 +84,8 @@ REQUEST_COUNT_PER_KEY = 0
 MAX_REQUESTS_BEFORE_ROTATE = 20 # 20回でローテーション
 NORMAL_WAIT_SECONDS = 15        # RPM制限対策 (12秒以上待機)
 
-GEMINI_PROMPT_TEMPLATE = None # 記事分析用
-COMMENT_PROMPT_TEMPLATE = None # コメント分析用
+GEMINI_PROMPT_TEMPLATE = None
+COMMENT_PROMPT_TEMPLATE = None
 
 # ====== ヘルパー関数群 ======
 
@@ -191,7 +191,6 @@ def load_comment_prompt() -> str:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(script_dir, "prompt_comment_analysis.txt"), 'r', encoding='utf-8') as f:
             content = f.read().strip()
-            # プレースホルダーを統一
             COMMENT_PROMPT_TEMPLATE = content.replace("{COMMENT_TEXT}", "{TEXT_TO_ANALYZE}")
             print(" コメント分析用プロンプトロード完了。")
             return COMMENT_PROMPT_TEMPLATE
@@ -213,10 +212,9 @@ def request_with_retry(url: str, max_retries: int = 3) -> Optional[requests.Resp
 
 def set_row_height(ws: gspread.Worksheet, row_height_pixels: int):
     try:
-        requests = [{"updateDimensionProperties": {
+        ws.spreadsheet.batch_update({"requests": [{"updateDimensionProperties": {
             "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": 1, "endIndex": ws.row_count},
-            "properties": {"pixelSize": row_height_pixels}, "fields": "pixelSize"}}]
-        ws.spreadsheet.batch_update({"requests": requests})
+            "properties": {"pixelSize": row_height_pixels}, "fields": "pixelSize"}}]})
     except: pass
 
 def update_sheet_with_retry(ws, range_name, values, max_retries=3):
@@ -236,7 +234,6 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
 def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) -> Any:
     """ API呼び出しの共通処理（ローテーション、リトライ含む） """
     
-    # 事前にカウントチェック
     increment_request_count()
     
     client = get_current_gemini_client()
@@ -247,7 +244,7 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash', # 【修正済み】正しいモデル名
+                model='gemini-1.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -259,11 +256,10 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
         except ResourceExhausted:
             print("    !! 429 Error (Quota Exceeded). Rotating key...")
             rotate_api_key(reason="429_error")
-            client = get_current_gemini_client() # クライアント更新
-            continue # リトライ
+            client = get_current_gemini_client()
+            continue
 
         except Exception as e:
-            # 429以外のエラーは、文字列に含まれていれば回転、そうでなければリトライ
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 print("    !! 429 Error detected in message. Rotating key...")
                 rotate_api_key(reason="429_in_msg")
@@ -278,11 +274,9 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
 # ====== 記事分析用関数 ======
 
 def analyze_article_batch(texts: List[str]) -> Optional[List[Dict[str, str]]]:
-    """ 5件まとめて分析。失敗したらNoneを返す """
     prompt_template = load_merged_prompt()
     if not prompt_template: return None
 
-    # テキスト結合
     combined_text = ""
     for i, txt in enumerate(texts):
         combined_text += f"\n【記事 {i+1}】\n{txt[:3000]}\n"
@@ -290,7 +284,6 @@ def analyze_article_batch(texts: List[str]) -> Optional[List[Dict[str, str]]]:
     prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", combined_text)
     prompt += f"\n\n※上記の{len(texts)}つの記事それぞれについて分析し、必ず{len(texts)}個のオブジェクトを含むJSONリスト形式で出力してください。"
 
-    # スキーマ定義
     schema = {
         "type": "array",
         "items": {
@@ -308,16 +301,14 @@ def analyze_article_batch(texts: List[str]) -> Optional[List[Dict[str, str]]]:
     result = call_gemini_api(prompt, is_batch=True, schema=schema)
     
     if result and isinstance(result, list):
-        # 件数が足りない場合の補完
         default = {"company_info": "N/A", "category": "N/A", "sentiment": "N/A", "nissan_related": "なし", "nissan_negative": "なし"}
         if len(result) < len(texts):
             result.extend([default] * (len(texts) - len(result)))
         return result[:len(texts)]
     
-    return None # 失敗
+    return None
 
 def analyze_article_single(text: str) -> Dict[str, str]:
-    """ 1件分析。失敗したらN/Aを返す """
     default = {"company_info": "N/A", "category": "N/A", "sentiment": "N/A", "nissan_related": "なし", "nissan_negative": "なし"}
     prompt_template = load_merged_prompt()
     if not prompt_template: return default
@@ -347,10 +338,9 @@ def analyze_article_single(text: str) -> Dict[str, str]:
         }
     return default
 
-# ====== コメント要約用関数 (New!) ======
+# ====== コメント要約用関数 ======
 
 def analyze_comment_summary(text: str) -> Dict[str, Any]:
-    """ コメント全文を受け取り、要約・批判・ランキングを返す """
     default = {
         "nissan_product_neg": "なし",
         "summaries": ["-", "-", "-"],
@@ -360,10 +350,8 @@ def analyze_comment_summary(text: str) -> Dict[str, Any]:
     prompt_template = load_comment_prompt()
     if not prompt_template: return default
     
-    # 制限: 最大12万文字程度にカット (トークン超過回避)
     prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text[:120000])
     
-    # スキーマ定義
     schema = {
         "type": "object",
         "properties": {
@@ -373,15 +361,10 @@ def analyze_comment_summary(text: str) -> Dict[str, Any]:
         }
     }
     
-    # 共通関数でGeminiを呼ぶ (APIキーローテーション含む)
     result = call_gemini_api(prompt, is_batch=False, schema=schema)
-    
-    if result and isinstance(result, dict):
-        return result
-        
-    return default
+    return result if result else default
 
-# ====== 記事取得関連 ======
+# ====== スクレイピング関数群 ======
 def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     print(f"  Yahoo!ニュース検索: {keyword}")
     opts = Options()
@@ -392,18 +375,14 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument(f"user-agent={REQ_HEADERS['User-Agent']}")
     opts.add_argument("--disable-blink-features=AutomationControlled")
-    
-    try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+    try: driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     except: return []
-    
     driver.get(f"https://news.yahoo.co.jp/search?p={keyword}&ei=utf-8&categories=domestic,world,business,it,science,life,local")
     try: WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "li[class*='sc-1u4589e-0']")))
     except: pass
     time.sleep(3)
     soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
-    
     data = []
     today = jst_now()
     for art in soup.find_all("li", class_=re.compile("sc-1u4589e-0")):
@@ -411,7 +390,6 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             title = art.find("div", class_=re.compile("sc-3ls169-0")).text.strip()
             link = art.find("a", href=True)["href"]
             if not link.startswith("https://news.yahoo.co.jp/articles/"): continue
-            
             date_str = art.find("time").text.strip() if art.find("time") else ""
             src_div = art.find("div", class_=re.compile("sc-n3vj8g-0"))
             source = ""
@@ -420,47 +398,38 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
                 if sub:
                     cands = [s.text.strip() for s in sub.find_all("span") if not s.find("svg") and not re.match(r'\d{1,2}/\d{1,2}.*\d{2}:\d{2}', s.text.strip())]
                     if cands: source = max(cands, key=len)
-            
             fmt_date = date_str
             try:
                 dt = parse_post_date(date_str, today)
                 if dt: fmt_date = format_datetime(dt)
                 else: fmt_date = re.sub(r"\([月火水木金土日]\)$", "", date_str).strip()
             except: pass
-            
             data.append({"URL": link, "タイトル": title, "投稿日時": fmt_date, "ソース": source})
         except: continue
-    
     print(f"  取得件数: {len(data)}")
     return data
 
 def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[str]]:
     aid = re.search(r'/articles/([a-f0-9]+)', base_url)
     if not aid: return "本文取得不可", -1, None
-    
     clean_url = base_url.split('?')[0]
     full_body = []
     cmt_cnt = -1
     ext_date = None
-    
     for page in range(1, MAX_PAGES + 1):
         res = request_with_retry(f"{clean_url}?page={page}")
         if not res: break
         if page > 1 and f"page={page}" not in res.url: break
-        
         soup = BeautifulSoup(res.text, 'html.parser')
-        
         if page == 1:
             btn = soup.find(["button", "a"], attrs={"data-cl-params": re.compile(r"cmtmod")})
             if btn:
                 m = re.search(r'(\d+)', btn.get_text(strip=True).replace(",", ""))
                 if m: cmt_cnt = int(m.group(1))
-            
             art_div = soup.find('article') or soup.find('div', class_=re.compile(r'article_body|article_detail'))
             if art_div:
                 m = re.search(r'(\d{1,2}/\d{1,2})\([月火水木金土日]\)(\s*)(\d{1,2}:\d{2})配信', art_div.get_text()[:500])
                 if m: ext_date = f"{m.group(1)} {m.group(3)}"
-
         content = soup.find('article') or soup.find('div', class_=re.compile(r'article_detail|article_body'))
         p_texts = []
         if content:
@@ -470,16 +439,12 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
                 txt = p.get_text(strip=True)
                 if txt and txt not in ["そう思う", "そう思わない", "学びがある", "わかりやすい", "新しい視点", "私もそう思います"]:
                     p_texts.append(txt)
-        
         if not p_texts: 
             if page > 1: break
-        
         page_txt = "\n".join(p_texts)
         if page > 1 and len(full_body) > 0 and page_txt == full_body[0].split('ーーーー\n')[-1]: break
-        
         full_body.append(f"\n{page}ページ目{'ー'*30}\n{page_txt}")
         time.sleep(1)
-
     return "".join(full_body).strip() or "本文取得不可", cmt_cnt, ext_date
 
 # ====== メイン処理フロー ======
@@ -552,49 +517,58 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
             update_sheet_with_retry(ws, f'C{row_num}:F{row_num}', [[new_post_date, str(data_row[3]), new_body, new_comment_count]])
             time.sleep(1 + random.random() * 0.5)
 
+def sort_yahoo_sheet(gc: gspread.Client):
+    sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
+    try: worksheet = sh.worksheet(SOURCE_SHEET_NAME)
+    except: return
+    last_row = len(worksheet.col_values(1))
+    if last_row <= 1: return
+    try:
+        reqs = []
+        for d in "月火水木金土日":
+            reqs.append({"findReplace": {"range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": MAX_SHEET_ROWS_FOR_REPLACE, "startColumnIndex": 2, "endColumnIndex": 3}, "find": rf"\({d}\)", "replacement": "", "searchByRegex": True}})
+        reqs.append({"findReplace": {"range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": MAX_SHEET_ROWS_FOR_REPLACE, "startColumnIndex": 2, "endColumnIndex": 3}, "find": r"\s{2,}", "replacement": " ", "searchByRegex": True}})
+        reqs.append({"findReplace": {"range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": MAX_SHEET_ROWS_FOR_REPLACE, "startColumnIndex": 2, "endColumnIndex": 3}, "find": r"^\s+|\s+$", "replacement": "", "searchByRegex": True}})
+        reqs.append({"repeatCell": {"range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": last_row, "startColumnIndex": 2, "endColumnIndex": 3}, "cell": {"userEnteredFormat": {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy/mm/dd hh:mm:ss"}}}, "fields": "userEnteredFormat.numberFormat"}})
+        worksheet.spreadsheet.batch_update({"requests": reqs})
+        time.sleep(2)
+    except Exception as e: print(f"整形エラー: {e}")
+    try:
+        # ソート範囲を安全のためにZ列まで広げておく
+        worksheet.sort((3, 'des'), range=f'A2:Z{last_row}')
+        print(" ? ソート完了")
+    except Exception as e: print(f"ソートエラー: {e}")
+    set_row_height(worksheet, 21)
+
 def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
-    """ バッチ処理 -> 失敗時はバラ実行へフォールバック """
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
     try: ws = sh.worksheet(SOURCE_SHEET_NAME)
     except: return
-    
     data_rows = ws.get_all_values()[1:]
     if not data_rows: return
-    
     print("\n=====   ステップ④ Gemini分析 (バッチ優先) =====")
-
     target_tasks = []
     for idx, row in enumerate(data_rows):
         row_num = idx + 2
         if len(row) < len(YAHOO_SHEET_HEADERS): row.extend([''] * (len(YAHOO_SHEET_HEADERS) - len(row)))
-        
         body = str(row[4])
-        # 判定用列(G~K)が埋まっていればスキップ
         if all(str(v).strip() for v in row[6:11]): continue 
-        
         if not body.strip() or body == "本文取得不可":
             update_sheet_with_retry(ws, f'G{row_num}:K{row_num}', [['N/A(No Body)', 'N/A', 'N/A', 'N/A', 'N/A']])
             continue
-            
         target_tasks.append({"row_num": row_num, "body": body})
 
     if not target_tasks:
         print("  - 新規分析対象はありません。")
         return
 
-    # バッチ処理ループ
     BATCH_SIZE = 5
     for i in range(0, len(target_tasks), BATCH_SIZE):
         batch = target_tasks[i : i + BATCH_SIZE]
         texts = [t["body"] for t in batch]
         row_nums = [t["row_num"] for t in batch]
-        
         print(f"  - 分析中 (行 {row_nums[0]} ~ {row_nums[-1]}) ...")
-        
-        # 1. バッチ実行
         results = analyze_article_batch(texts)
-        
-        # 2. 成功した場合
         if results:
             for j, res in enumerate(results):
                 n_rel, n_neg = res["nissan_related"], res["nissan_negative"]
@@ -605,20 +579,13 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
                     if txt.lower() == "none":
                         if txt == n_rel: n_rel = "なし"
                         if txt == n_neg: n_neg = "なし"
-                
-                vals = [[res["company_info"], res["category"], res["sentiment"], n_rel, n_neg]]
-                update_sheet_with_retry(ws, f'G{row_nums[j]}:K{row_nums[j]}', vals)
-            
+                update_sheet_with_retry(ws, f'G{row_nums[j]}:K{row_nums[j]}', [[res["company_info"], res["category"], res["sentiment"], n_rel, n_neg]])
             print(f"    (Batch OK: {NORMAL_WAIT_SECONDS}s 待機)")
             time.sleep(NORMAL_WAIT_SECONDS)
-            
         else:
-            # 3. 失敗した場合 -> バラ実行
-            print("    ! バッチ失敗 -> バラ実行に切り替えます。")
+            print("    ! バッチ失敗 -> バラ実行")
             for item in batch:
-                print(f"      > 個別実行 (行 {item['row_num']})...")
                 res = analyze_article_single(item["body"])
-                
                 n_rel, n_neg = res["nissan_related"], res["nissan_negative"]
                 for txt in [n_rel, n_neg]:
                     if any(x in txt for x in ["not mentioned", "no mention", "発見されませんでした", "言及はありません"]):
@@ -627,24 +594,17 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
                     if txt.lower() == "none":
                         if txt == n_rel: n_rel = "なし"
                         if txt == n_neg: n_neg = "なし"
-
-                vals = [[res["company_info"], res["category"], res["sentiment"], n_rel, n_neg]]
-                update_sheet_with_retry(ws, f'G{item["row_num"]}:K{item["row_num"]}', vals)
-                
-                print(f"      (Single OK: {NORMAL_WAIT_SECONDS}s 待機)")
+                update_sheet_with_retry(ws, f'G{item["row_num"]}:K{item["row_num"]}', [[res["company_info"], res["category"], res["sentiment"], n_rel, n_neg]])
                 time.sleep(NORMAL_WAIT_SECONDS)
-
     print(" ? Gemini分析完了。")
 
 def main():
     print("--- 統合スクリプト開始 ---")
     keys = load_keywords(KEYWORD_FILE)
     if not keys: sys.exit(0)
-    
     try: gc = build_gspread_client()
     except Exception as e: print(f"致命的エラー: {e}"); sys.exit(1)
     
-    # ① ニュース取得
     for k in keys:
         print(f"\n===== ① 取得: {k} =====")
         data = get_yahoo_news_with_selenium(k)
@@ -654,20 +614,14 @@ def main():
         if new: ws.append_rows(new, value_input_option='USER_ENTERED')
         time.sleep(2)
 
-    # ② 詳細取得
     print("\n===== ② 詳細取得 =====")
     fetch_details_and_update_sheet(gc)
-
-    # ③ ソート
     print("\n===== ③ ソート・整形 =====")
     sort_yahoo_sheet(gc)
-    
-    # ④ Gemini分析 (一括)
+    print("\n===== ④ Gemini分析 =====")
     analyze_with_gemini_and_update_sheet(gc)
     
-    # ⑤ コメント収集・要約
-    print("\n===== ⑤ コメント取得・要約開始 =====")
-    # ここで要約用関数(analyze_comment_summary)を渡す
+    print("\n===== ⑤ コメント収集・要約 =====")
     comment_scraper.run_comment_collection(gc, SHARED_SPREADSHEET_ID, SOURCE_SHEET_NAME, analyze_comment_summary)
     
     print("\n--- 統合スクリプト完了 ---")
@@ -675,5 +629,4 @@ def main():
 if __name__ == '__main__':
     if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        
     main()
