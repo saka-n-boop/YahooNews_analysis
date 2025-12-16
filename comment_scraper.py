@@ -1,5 +1,6 @@
 import time
 import re
+import json
 import requests
 from bs4 import BeautifulSoup
 import gspread
@@ -12,8 +13,6 @@ def ensure_comments_sheet(sh: gspread.Spreadsheet):
     """ Commentsシートがなければ作成し、ヘッダーを設定する """
     try:
         ws = sh.worksheet(COMMENTS_SHEET_NAME)
-        # 既存シートがある場合は、ユーザー側で列調整済みとみなして何もしない
-        # (ヘッダーの強制上書きは既存データを壊す恐れがあるため行わない)
     except gspread.exceptions.WorksheetNotFound:
         # 列数は多めに確保 (300列 = KN列まで)
         ws = sh.add_worksheet(title=COMMENTS_SHEET_NAME, rows="1000", cols="300")
@@ -23,7 +22,7 @@ def ensure_comments_sheet(sh: gspread.Spreadsheet):
         headers = [
             "URL", "タイトル", "投稿日時", "ソース", 
             "コメント数", "製品批判有無", 
-            "コメント要約(全体)", "コメントランキング(TOP5)"
+            "コメント要約(全体)", "話題TOP5"
         ]
         
         # コメント本文列：1-10 ... (9列目から開始)
@@ -99,7 +98,6 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
         merged_text = "\n\n".join(chunk)
         merged_columns.append(merged_text)
     
-    # 分析用に全コメントを結合した文字列も返す
     full_text_for_ai = "\n".join(all_comments_data)
     
     print(f"    - 取得完了: 全{len(all_comments_data)}件")
@@ -125,7 +123,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
 
     dest_ws = ensure_comments_sheet(sh)
     
-    # 既存URLの取得
+    # 既存チェック
     dest_rows = dest_ws.get_all_values()
     existing_urls = set()
     if len(dest_rows) > 1:
@@ -137,8 +135,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
     # 生データ（ヘッダー除く）
     raw_data_rows = source_rows[1:]
     
-    # --- 処理順序の並び替えロジック ---
-    # コメント数が多い順に処理したいので、一時リストを作ってソートする
+    # コメント数順にソートするためのリスト作成
     sorted_target_rows = []
     
     for i, row in enumerate(raw_data_rows):
@@ -151,24 +148,23 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         except:
             cnt = 0
             
-        # ソート用に辞書化 (元の行番号iも保持)
         sorted_target_rows.append({
             "original_index": i,
             "count": cnt,
             "data": row
         })
     
-    # コメント数(count)の降順でソート
+    # コメント数が多い順に並び替え
     sorted_target_rows.sort(key=lambda x: x['count'], reverse=True)
     
     print(f"  - 分析順序: コメント数が多い順に {len(sorted_target_rows)} 件をスキャンします。")
 
     process_count = 0
 
-    # ソートされた順序でループ
     for item in sorted_target_rows:
         row = item['data']
-        i = item['original_index'] # 元の行番号(ログ表示用)
+        i = item['original_index']
+        comment_cnt = item['count'] # 数値化したコメント数
         
         url = row[0]
         title = row[1]
@@ -181,14 +177,17 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         
         if url in existing_urls: continue
 
-        # --- 条件判定 ---
+        # --- 条件判定 (修正版) ---
         is_target = False
         
-        # 前提: 対象企業が「日産」で始まり、かつカテゴリが「その他」を含まない
-        if target_company.startswith("日産") and "その他" not in category:
+        # 1. 共通の前提条件:
+        #    - 対象企業が「日産」で始まる
+        #    - カテゴリが「その他」を含まない
+        #    - 【追加】コメント数が1以上であること (0件は除外)
+        if target_company.startswith("日産") and "その他" not in category and comment_cnt > 0:
             
             # 条件①: コメント数が100件以上
-            if item['count'] >= 100:
+            if comment_cnt >= 100:
                 is_target = True
             
             # 条件②: 日産ネガ文に記載がある ("なし" 以外)
@@ -198,7 +197,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
                     is_target = True
         
         if is_target:
-            print(f"  - 対象記事発見(元行{i+2}, コメ数{item['count']}): {title[:20]}...")
+            print(f"  - 対象記事発見(元行{i+2}, コメ数{comment_cnt}): {title[:20]}...")
             
             # コメント取得
             comment_cols, full_text = fetch_comments_from_url(url)
@@ -211,16 +210,13 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
                 # 結果の展開
                 prod_neg = summary_data.get("nissan_product_neg", "N/A")
                 
-                # 要約を1つの文字列に結合
                 summaries_list = summary_data.get("summaries", [])
                 summary_combined = "\n\n".join(summaries_list) if summaries_list else "-"
                 
-                # ランキングを1つの文字列に結合
                 rankings_list = summary_data.get("topic_ranking", [])
                 ranking_combined = "\n".join(rankings_list) if rankings_list else "-"
 
-                # データ構築 (新ヘッダー対応)
-                # [URL, タイトル, 日時, ソース, コメント数, 製品批判, 要約(統合), ランキング(統合), コメント本文...]
+                # データ構築
                 row_data = [
                     url, title, post_date, source, 
                     comment_count_str, 
@@ -241,8 +237,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         try:
             last_row = len(dest_ws.col_values(1))
             if last_row > 1:
-                # C列(3列目)の日付で降順ソート
-                # 範囲を KN列(300列) まで指定
+                # KN列(300列) まで指定
                 dest_ws.sort((3, 'des'), range=f'A2:KN{last_row}') 
         except Exception as e: print(f"  ! ソートエラー: {e}")
         set_row_height(dest_ws, 21)
