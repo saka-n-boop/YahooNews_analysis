@@ -94,8 +94,10 @@ def get_current_gemini_client() -> Optional[genai.Client]:
     if not AVAILABLE_API_KEYS:
         return None
     api_key = AVAILABLE_API_KEYS[CURRENT_KEY_INDEX]
-    return genai.Client(api_key=api_key)
-
+    return genai.Client(
+        api_key=api_key, 
+        http_options={'timeout': 600}
+    )
 def rotate_api_key(reason="limit_reached"):
     """ APIキーを次のものに切り替える """
     global CURRENT_KEY_INDEX, REQUEST_COUNT_PER_KEY
