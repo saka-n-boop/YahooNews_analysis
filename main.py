@@ -230,7 +230,7 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
             time.sleep(10 * (attempt + 1))
     print(f"  !! 更新失敗: {range_name}")
 
-# ====== Gemini 共通呼び出し関数 ======
+# ====== Gemini 共通呼び出し関数 (修正版) ======
 def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) -> Any:
     """ API呼び出しの共通処理（ローテーション、リトライ含む） """
     
@@ -241,33 +241,37 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
 
     MAX_RETRIES = 2 
     
+    # 【修正】無料枠用のセーフティ設定定義
+    # 無料枠では BLOCK_NONE が使えないため BLOCK_ONLY_HIGH にします
+    safety_settings_free = [
+        types.SafetySetting(
+            category="HARM_CATEGORY_HATE_SPEECH",
+            threshold="BLOCK_ONLY_HIGH"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold="BLOCK_ONLY_HIGH"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold="BLOCK_ONLY_HIGH"
+        ),
+        types.SafetySetting(
+            category="HARM_CATEGORY_HARASSMENT",
+            threshold="BLOCK_ONLY_HIGH"
+        )
+    ]
+
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-2.5-flash', 
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=schema,
-                    # 【追加】セーフティフィルタを無効化する設定
-                    safety_settings=[
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_HATE_SPEECH",
-                            threshold="BLOCK_NONE"
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                            threshold="BLOCK_NONE"
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            threshold="BLOCK_NONE"
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_HARASSMENT",
-                            threshold="BLOCK_NONE"
-                        )
-                    ]
+                    # ここで変数を適用
+                    safety_settings=safety_settings_free
                 ),
             )
             return json.loads(response.text.strip())
@@ -277,8 +281,13 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
             rotate_api_key(reason="429_error")
             client = get_current_gemini_client()
             continue
-
+        
+        # 無料枠でBLOCK_NONEを使ってしまった場合の400エラー対策
         except Exception as e:
+            if "restricted HarmBlockThreshold" in str(e):
+                print("    !! Config Error: BLOCK_NONE is not allowed on Free Tier.")
+                return None
+
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 print("    !! 429 Error detected in message. Rotating key...")
                 rotate_api_key(reason="429_in_msg")
@@ -287,7 +296,7 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
             
             print(f"    ! API Error: {e}")
             return None 
-            
+
     return None
 
 # ====== 記事分析用関数 ======
