@@ -383,7 +383,7 @@ def analyze_comment_summary(text: str) -> Dict[str, Any]:
     prompt_template = load_comment_prompt()
     if not prompt_template: return default
     
-    prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text[:40000])
+    prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text[:100000])
     
     schema = {
         "type": "object",
