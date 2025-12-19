@@ -291,7 +291,7 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
             
             # 3. 【追加】サーバー混雑 (503 Overloaded) -> 少し待ってリトライ
             if "503" in err_msg or "overloaded" in err_msg or "UNAVAILABLE" in err_msg:
-                wait_sec = 10 * (attempt + 1) # 回数ごとに待ち時間を増やす (20秒, 40秒...)
+                wait_sec = 30 * (attempt + 1) # 回数ごとに待ち時間を増やす (20秒, 40秒...)
                 print(f"    !! Server Overloaded (503). Retrying in {wait_sec}s... ({attempt+1}/{MAX_RETRIES})")
                 time.sleep(wait_sec)
                 # continueすることで、forループの最初に戻り再実行される
