@@ -299,7 +299,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
     
             # 条件①: 対象企業が日産系 かつ コメント数が100件以上
             if target_company.startswith("日産") and comment_cnt >= 100:
-            is_target = True
+                is_target = True
     
             # 条件②: 日産ネガ文に記載がある ("なし" 以外) ※条件①を満たしていない場合のみ判定
             if not is_target:
@@ -354,4 +354,5 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         set_row_height(dest_ws, 21)
 
     print(f" ? コメント収集・要約完了: 新たに {process_count} 件処理しました。")
+
 
