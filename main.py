@@ -596,7 +596,7 @@ def sort_yahoo_sheet(gc: gspread.Client):
     try:
         # ソート範囲を安全のためにZ列まで広げておく
         worksheet.sort((3, 'des'), range=f'A2:Z{last_row}')
-        print(" ? ソート完了")
+        print(" ソート完了")
     except Exception as e: print(f"ソートエラー: {e}")
     set_row_height(worksheet, 21)
 
@@ -606,7 +606,7 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     except: return
     data_rows = ws.get_all_values()[1:]
     if not data_rows: return
-    print("\n=====   ステップ④ Gemini分析 (バッチ優先) =====")
+    print("\n=====   ステップ４ Gemini分析 (バッチ優先) =====")
     target_tasks = []
     for idx, row in enumerate(data_rows):
         row_num = idx + 2
@@ -656,7 +656,7 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
                         if txt == n_neg: n_neg = "なし"
                 update_sheet_with_retry(ws, f'G{item["row_num"]}:K{item["row_num"]}', [[res["company_info"], res["category"], res["sentiment"], n_rel, n_neg]])
                 time.sleep(NORMAL_WAIT_SECONDS)
-    print(" ? Gemini分析完了。")
+    print("  Gemini分析完了。")
 
 def main():
     print("--- 統合スクリプト開始 ---")
@@ -666,7 +666,7 @@ def main():
     except Exception as e: print(f"致命的エラー: {e}"); sys.exit(1)
     
     for k in keys:
-        print(f"\n===== ① 取得: {k} =====")
+        print(f"\n===== １ 取得: {k} =====")
         data = get_yahoo_news_with_selenium(k)
         ws = ensure_source_sheet(gc)
         exist = set(str(r[0]) for r in ws.get_all_values()[1:] if len(r)>0 and str(r[0]).startswith("http"))
@@ -674,13 +674,13 @@ def main():
         if new: ws.append_rows(new, value_input_option='USER_ENTERED')
         time.sleep(2)
 
-    print("\n===== ② 詳細取得 =====")
+    print("\n===== ２ 詳細取得 =====")
     fetch_details_and_update_sheet(gc)
-    print("\n===== ③ ソート・整形 =====")
+    print("\n===== ３ ソート・整形 =====")
     sort_yahoo_sheet(gc)
-    print("\n===== ④ Gemini分析 =====")
+    print("\n===== ４ Gemini分析 =====")
     analyze_with_gemini_and_update_sheet(gc)
-    print("\n===== ⑤ コメント収集・要約 =====")
+    print("\n===== ５ コメント収集・要約 =====")
     comment_scraper.run_comment_collection(gc, SHARED_SPREADSHEET_ID, SOURCE_SHEET_NAME, analyze_comment_summary)
     
     print("\n--- 統合スクリプト完了 ---")
